@@ -277,6 +277,8 @@ conn.execute('''INSERT INTO records (date, unit, total, items_json) VALUES (?,?,
 | 4.1 AI 輔助解析 | 中 | ★★★★★ | 長期規劃 |
 | 4.2 SQLite 記錄 | 中 | ★★★☆☆ | 長期規劃 |
 
+> ✅ **已完成**：靜態模式 ExcelJS 格式完整保留（v1.1.0）
+
 ---
 
 *本文件由 Claude AI 輔助撰寫，供石門國小行政工具開發參考。*

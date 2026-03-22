@@ -4,8 +4,8 @@
  * 雙模式運作：
  *  1. 本地模式（run.py）：呼叫 /api/generate，由 Python openpyxl 填寫
  *     → 完整保留原始格式（欄寬、列高、框線、合併儲存格）
- *  2. 靜態模式（GitHub Pages）：使用 SheetJS 在瀏覽器端填寫
- *     → 資料正確，但部分格式可能與原始不同
+ *  2. 靜態模式（GitHub Pages）：使用 ExcelJS 在瀏覽器端填寫
+ *     → 完整保留原始格式（ExcelJS 支援樣式讀寫）
  *
  * 公式欄位（兩種模式皆不修改）：
  *   代收代辦: P4, H5-O5, F13, G15/G17/.../G29, G31, L31
@@ -13,7 +13,7 @@
  *
  * 品項列（row 15,17,19,21,23,25,27,29）：
  *   A欄=名稱及規格, C欄=數量, E欄=單價
- *   代收代辦用途說明=J15, 預算內用途說明=I15
+ *   代收代辦用途說明=J15(col10), 預算內用途說明=I15(col9)
  */
 
 const ExcelGenerator = (() => {
@@ -60,7 +60,7 @@ const ExcelGenerator = (() => {
         return new Uint8Array(buffer);
     }
 
-    // ===== 靜態 SheetJS 模式 =====
+    // ===== 靜態 ExcelJS 模式 =====
 
     async function loadTemplate() {
         const response = await fetch('template/template.xlsx');
@@ -68,86 +68,70 @@ const ExcelGenerator = (() => {
         return await response.arrayBuffer();
     }
 
-    function cellRef(col, row) {
-        return XLSX.utils.encode_cell({ c: col, r: row - 1 });
+    /**
+     * 安全設定儲存格值：
+     * - 公式儲存格：不覆蓋（保留原始公式）
+     * - value=null 時：清除資料（不清除公式儲存格）
+     */
+    function setVal(ws, row, col, value) {
+        const cell = ws.getCell(row, col);
+        const isFormula = cell.value && typeof cell.value === 'object' && cell.value.formula;
+        if (isFormula) return; // 公式儲存格永不覆蓋
+        cell.value = value;
     }
 
-    function setCellValue(ws, ref, value, type) {
-        if (!ws[ref]) ws[ref] = {};
-        ws[ref].v = value;
-        ws[ref].t = type || (typeof value === 'number' ? 'n' : 's');
-        delete ws[ref].w;
-    }
-
-    function clearCell(ws, ref) {
-        if (ws[ref] && !ws[ref].f) delete ws[ref];
-    }
-
-    async function generateViaSheetJS(params) {
+    async function generateViaExcelJS(params) {
         const templateData = await loadTemplate();
-        const wb = XLSX.read(templateData, {
-            type: 'array',
-            cellFormula: true,
-            cellStyles: true,
-            bookVBA: true
-        });
+
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(templateData);
 
         const sheetName = params.templateType;
-        const ws = wb.Sheets[sheetName];
+        const ws = workbook.getWorksheet(sheetName);
         if (!ws) throw new Error(`找不到工作表「${sheetName}」`);
-
-        // 確保 range 足夠
-        const range = XLSX.utils.decode_range(ws['!ref']);
-        if (range.e.r < 34) range.e.r = 34;
-        if (range.e.c < 22) range.e.c = 22;
-        ws['!ref'] = XLSX.utils.encode_range(range);
 
         const items = params.items.slice(0, 8);
 
-        // 清除舊品項
+        // 清除品項舊資料
         for (const row of ITEM_ROWS) {
-            clearCell(ws, cellRef(0, row));
-            clearCell(ws, cellRef(2, row));
-            clearCell(ws, cellRef(4, row));
+            setVal(ws, row, 1, null);  // A = 名稱及規格
+            setVal(ws, row, 3, null);  // C = 數量
+            setVal(ws, row, 5, null);  // E = 單價
         }
 
         // 填入品項
         for (let i = 0; i < items.length; i++) {
             const row = ITEM_ROWS[i];
             const item = items[i];
-            if (item.name) setCellValue(ws, cellRef(0, row), item.name, 's');
-            if (item.quantity) setCellValue(ws, cellRef(2, row), item.quantity, 'n');
-            if (item.unitPrice) setCellValue(ws, cellRef(4, row), item.unitPrice, 'n');
+            if (item.name)      setVal(ws, row, 1, item.name);
+            if (item.quantity)  setVal(ws, row, 3, Number(item.quantity));
+            if (item.unitPrice) setVal(ws, row, 5, Number(item.unitPrice));
         }
 
-        // 用途說明
+        // 用途說明（第 15 列）
         if (params.purpose) {
-            const purposeCol = sheetName === '代收代辦' ? 9 : 8;
-            setCellValue(ws, cellRef(purposeCol, 15), params.purpose, 's');
+            const purposeCol = sheetName === '代收代辦' ? 10 : 9; // J=10, I=9
+            setVal(ws, 15, purposeCol, params.purpose);
         }
 
-        // 單位別 B13
-        if (params.unit) setCellValue(ws, cellRef(1, 13), params.unit, 's');
+        // 單位別（B13）
+        if (params.unit) setVal(ws, 13, 2, params.unit);
 
-        // 日期（月、日）
+        // 月、日（年由公式自動帶入）
         if (sheetName === '代收代辦') {
-            if (params.month) setCellValue(ws, cellRef(9, 13), params.month, 'n');
-            if (params.day) setCellValue(ws, cellRef(11, 13), params.day, 'n');
+            if (params.month) setVal(ws, 13, 10, Number(params.month)); // J13
+            if (params.day)   setVal(ws, 13, 12, Number(params.day));   // L13
         } else {
-            if (params.month) setCellValue(ws, cellRef(8, 13), params.month, 'n');
-            if (params.day) setCellValue(ws, cellRef(10, 13), params.day, 'n');
+            if (params.month) setVal(ws, 13, 9,  Number(params.month)); // I13
+            if (params.day)   setVal(ws, 13, 11, Number(params.day));   // K13
         }
 
-        // 預算科目
-        if (params.budgetCategory) setCellValue(ws, cellRef(1, 4), params.budgetCategory, 's');
-        if (params.budgetSubCategory) setCellValue(ws, cellRef(1, 5), params.budgetSubCategory, 's');
+        // 預算科目（B4, B5）
+        if (params.budgetCategory)    setVal(ws, 4, 2, params.budgetCategory);
+        if (params.budgetSubCategory) setVal(ws, 5, 2, params.budgetSubCategory);
 
-        return XLSX.write(wb, {
-            bookType: 'xlsx',
-            type: 'array',
-            cellFormula: true,
-            cellStyles: true
-        });
+        const buffer = await workbook.xlsx.writeBuffer();
+        return new Uint8Array(buffer);
     }
 
     // ===== 主要入口 =====
@@ -158,7 +142,7 @@ const ExcelGenerator = (() => {
         if (pythonAvailable) {
             return await generateViaPython(params);
         } else {
-            return await generateViaSheetJS(params);
+            return await generateViaExcelJS(params);
         }
     }
 
