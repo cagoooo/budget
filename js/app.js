@@ -523,7 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                         <circle cx="12" cy="12" r="10"/>
                     </svg>
-                    靜態模式｜格式基本保留`;
+                    靜態模式｜格式完整保留`;
             }
         } catch {
             // 靜默失敗
