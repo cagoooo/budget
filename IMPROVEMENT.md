@@ -278,6 +278,7 @@ conn.execute('''INSERT INTO records (date, unit, total, items_json) VALUES (?,?,
 | 4.2 SQLite 記錄 | 中 | ★★★☆☆ | 長期規劃 |
 
 > ✅ **已完成**：靜態模式 ExcelJS 格式完整保留（v1.1.0）
+> ✅ **已完成**：修正 Excel 開啟顯示錯誤工作表導致內容空白問題（v1.2.0）
 
 ---
 

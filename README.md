@@ -1,6 +1,6 @@
 # 動支及黏存單自動產生系統
 
-> 桃園市龍潭區石門國民小學 — 開源行政工具　　![版本](https://img.shields.io/badge/版本-v1.1.0-blue) ![授權](https://img.shields.io/badge/授權-MIT-green)
+> 桃園市龍潭區石門國民小學 — 開源行政工具　　![版本](https://img.shields.io/badge/版本-v1.2.0-blue) ![授權](https://img.shields.io/badge/授權-MIT-green)
 
 上傳廠商報價單 PDF，自動解析品項，一鍵產出格式完整的動支及黏存單 Excel 檔案。
 
