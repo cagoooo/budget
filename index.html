@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>動支及黏存單自動產生系統 | 石門國小</title>
+
+    <!-- ===== SEO ===== -->
+    <meta name="description" content="上傳廠商報價單 PDF，自動解析品項並產出格式完整的動支及黏存單 Excel 檔案。桃園市龍潭區石門國民小學開源工具。">
+    <meta name="keywords" content="動支單,黏存單,報價單,PDF,Excel,自動產生,石門國小,學校行政">
+    <meta name="author" content="桃園市龍潭區石門國民小學">
+
+    <!-- ===== Open Graph (FB / LINE 分享卡片) ===== -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="動支及黏存單自動產生系統">
+    <meta property="og:description" content="上傳廠商報價單 PDF，自動解析品項並一鍵產出格式完整的動支及黏存單 Excel。完全在瀏覽器端處理，免安裝、免上傳。">
+    <meta property="og:image" content="og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:locale" content="zh_TW">
+
+    <!-- ===== Twitter Card ===== -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="動支及黏存單自動產生系統">
+    <meta name="twitter:description" content="上傳廠商報價單 PDF，自動解析品項並一鍵產出格式完整的動支及黏存單 Excel。">
+    <meta name="twitter:image" content="og-image.png">
+
+    <!-- ===== Favicon ===== -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <h1 class="header-title">動支及黏存單自動產生系統</h1>
+            <p class="header-subtitle">上傳報價單 PDF，自動產出動支及黏存單</p>
+            <div class="mode-badge" id="modeBadge" style="display:none;"></div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Step 1: Upload PDF -->
+        <section class="step-section" id="step1">
+            <div class="step-header">
+                <span class="step-number">1</span>
+                <h2>上傳報價單 PDF</h2>
+            </div>
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                </div>
+                <p class="upload-text">將 PDF 檔案拖曳到此處，或</p>
+                <label class="upload-btn" for="pdfInput">選擇檔案</label>
+                <input type="file" id="pdfInput" accept=".pdf" hidden>
+                <p class="upload-hint">支援廠商報價單 PDF 格式</p>
+            </div>
+            <div class="file-info" id="fileInfo" style="display:none;">
+                <div class="file-info-content">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <span id="fileName"></span>
+                    <button class="btn-icon" id="removeFile" title="移除檔案">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Step 2: Review Parsed Data -->
+        <section class="step-section" id="step2" style="display:none;">
+            <div class="step-header">
+                <span class="step-number">2</span>
+                <h2>確認解析結果</h2>
+            </div>
+            <div class="parsed-info-card">
+                <h3>報價單資訊</h3>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <label>廠商名稱</label>
+                        <span id="vendorName">-</span>
+                    </div>
+                    <div class="info-item">
+                        <label>報價日期</label>
+                        <span id="quoteDate">-</span>
+                    </div>
+                    <div class="info-item">
+                        <label>總金額</label>
+                        <span id="totalAmount">-</span>
+                    </div>
+                </div>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table" id="parsedTable">
+                    <thead>
+                        <tr>
+                            <th class="col-seq">序</th>
+                            <th class="col-name">品名及規格</th>
+                            <th class="col-qty">數量</th>
+                            <th class="col-price">單價</th>
+                            <th class="col-subtotal">小計</th>
+                            <th class="col-action">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="parsedBody">
+                    </tbody>
+                </table>
+            </div>
+            <div class="table-actions">
+                <button class="btn btn-outline" id="addItemBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    新增品項
+                </button>
+            </div>
+            <div class="notice-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span>最多可填入 <strong>8</strong> 筆品項至動支單。可直接點選表格內容進行編輯。</span>
+            </div>
+        </section>
+
+        <!-- Step 3: Fill Form Fields -->
+        <section class="step-section" id="step3" style="display:none;">
+            <div class="step-header">
+                <span class="step-number">3</span>
+                <h2>填寫動支單資訊</h2>
+            </div>
+            <div class="form-card">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="templateType">表單類型 <span class="required">*</span></label>
+                        <select id="templateType">
+                            <option value="預算內">預算內</option>
+                            <option value="代收代辦">代收代辦</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="unitSelect">單位別 <span class="required">*</span></label>
+                        <select id="unitSelect">
+                            <option value="總務處 ">總務處</option>
+                            <option value="教務處 ">教務處</option>
+                            <option value="學務處 ">學務處</option>
+                            <option value="輔導室 ">輔導室</option>
+                            <option value="人事室 ">人事室</option>
+                            <option value="會計室 ">會計室</option>
+                            <option value="出納 ">出納</option>
+                            <option value="午餐秘書 ">午餐秘書</option>
+                            <option value="幼兒園 ">幼兒園</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="purposeInput">用途說明 <span class="required">*</span></label>
+                        <input type="text" id="purposeInput" placeholder="例：行政人員電腦備份移機專用快速開機硬碟">
+                    </div>
+                    <div class="form-group form-group-date">
+                        <label>日期</label>
+                        <div class="date-inputs">
+                            <div class="date-field">
+                                <input type="number" id="dateYear" placeholder="114" min="100" max="200">
+                                <span>年</span>
+                            </div>
+                            <div class="date-field">
+                                <input type="number" id="dateMonth" placeholder="3" min="1" max="12">
+                                <span>月</span>
+                            </div>
+                            <div class="date-field">
+                                <input type="number" id="dateDay" placeholder="22" min="1" max="31">
+                                <span>日</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Budget category for 預算內 -->
+                <div class="form-group" id="budgetCategoryGroup">
+                    <label for="budgetCategory">預算科目</label>
+                    <select id="budgetCategory">
+                        <option value="">-- 請選擇一級科目 --</option>
+                    </select>
+                </div>
+                <div class="form-group" id="budgetSubCategoryGroup" style="display:none;">
+                    <label for="budgetSubCategory">二級科目</label>
+                    <select id="budgetSubCategory">
+                        <option value="">-- 請先選擇一級科目 --</option>
+                    </select>
+                </div>
+
+                <!-- Budget category for 代收代辦 -->
+                <div class="form-group" id="agencyCategoryGroup" style="display:none;">
+                    <label for="agencyCategory">一級科目</label>
+                    <select id="agencyCategory">
+                        <option value="">-- 請選擇一級科目 --</option>
+                    </select>
+                </div>
+                <div class="form-group" id="agencySubCategoryGroup" style="display:none;">
+                    <label for="agencySubCategory">二級科目</label>
+                    <select id="agencySubCategory">
+                        <option value="">-- 請先選擇一級科目 --</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+
+        <!-- Step 4: Generate -->
+        <section class="step-section" id="step4" style="display:none;">
+            <div class="step-header">
+                <span class="step-number">4</span>
+                <h2>產生動支及黏存單</h2>
+            </div>
+            <div class="preview-card">
+                <h3>匯出預覽</h3>
+                <div class="preview-summary" id="previewSummary">
+                </div>
+                <div class="generate-actions">
+                    <button class="btn btn-primary btn-lg" id="generateBtn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        產生並下載 Excel 檔案
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p>桃園市龍潭區石門國民小學 &mdash; 動支及黏存單自動產生系統</p>
+            <p class="footer-note">開源專案，歡迎貢獻 | 本系統僅於瀏覽器端處理資料，不上傳任何檔案</p>
+            <p class="footer-note" style="margin-top:4px;opacity:0.5;font-size:0.75rem;">v1.0.0</p>
+        </div>
+    </footer>
+
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+        <div class="loading-spinner"></div>
+        <p id="loadingText">正在解析 PDF...</p>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="js/pdf-parser.js"></script>
+    <script src="js/excel-generator.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
