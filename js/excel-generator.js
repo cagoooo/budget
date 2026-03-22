@@ -90,6 +90,21 @@ const ExcelGenerator = (() => {
         const ws = workbook.getWorksheet(sheetName);
         if (!ws) throw new Error(`找不到工作表「${sheetName}」`);
 
+        // 設定開啟時顯示正確的工作表（0-indexed）
+        const activeIdx = workbook.worksheets.findIndex(s => s.name === sheetName);
+        workbook.views = [{ activeTab: activeIdx }];
+
+        // 清除另一張 sheet 的舊資料，避免混淆
+        const otherName = sheetName === '預算內' ? '代收代辦' : '預算內';
+        const wsOther = workbook.getWorksheet(otherName);
+        if (wsOther) {
+            for (const row of ITEM_ROWS) {
+                wsOther.getCell(row, 1).value = null;
+                wsOther.getCell(row, 3).value = null;
+                wsOther.getCell(row, 5).value = null;
+            }
+        }
+
         const items = params.items.slice(0, 8);
 
         // 清除品項舊資料

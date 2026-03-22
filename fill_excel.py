@@ -131,6 +131,14 @@ def process(input_path, data, output_path):
 
     fill_data(ws, data, cols)
 
+    # 設定開啟時顯示正確的工作表，並清除另一張的舊資料
+    wb.active = wb[sheet_name]
+    other_name = '代收代辦' if sheet_name == '預算內' else '預算內'
+    if other_name in wb.sheetnames:
+        ws_other = wb[other_name]
+        other_cols = SHEET_COLUMNS[other_name]
+        clear_item_rows(ws_other, other_cols)
+
     wb.save(output_path)
     return output_path
 
