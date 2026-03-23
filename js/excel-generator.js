@@ -4,8 +4,8 @@
  * 雙模式運作：
  *  1. 本地模式（run.py）：呼叫 /api/generate，由 Python openpyxl 填寫
  *     → 完整保留原始格式（欄寬、列高、框線、合併儲存格）
- *  2. 靜態模式（GitHub Pages）：使用 ExcelJS 在瀏覽器端填寫
- *     → 完整保留原始格式（ExcelJS 支援樣式讀寫）
+ *  2. 靜態模式（GitHub Pages）：使用 JSZip 直接修補工作表 XML
+ *     → 完整保留原始格式（不重新生成 XML，只替換特定儲存格值）
  *
  * 公式欄位（兩種模式皆不修改）：
  *   代收代辦: P4, H5-O5, F13, G15/G17/.../G29, G31, L31
@@ -13,12 +13,33 @@
  *
  * 品項列（row 15,17,19,21,23,25,27,29）：
  *   A欄=名稱及規格, C欄=數量, E欄=單價
- *   代收代辦用途說明=J15(col10), 預算內用途說明=I15(col9)
+ *   代收代辦用途說明=J15, 預算內用途說明=I15
+ *   代收代辦月=J13 日=L13, 預算內月=I13 日=K13
  */
 
 const ExcelGenerator = (() => {
 
     const ITEM_ROWS = [15, 17, 19, 21, 23, 25, 27, 29];
+
+    // sheet 檔案對應（由 workbook.xml 確認）
+    const SHEET_FILES = {
+        '代收代辦': 'xl/worksheets/sheet1.xml',
+        '預算內':   'xl/worksheets/sheet2.xml'
+    };
+
+    // 各 sheet 的目標儲存格設定
+    const SHEET_CELLS = {
+        '預算內': {
+            purposeCell: 'I15',
+            monthCell:   'I13',
+            dayCell:     'K13'
+        },
+        '代收代辦': {
+            purposeCell: 'J15',
+            monthCell:   'J13',
+            dayCell:     'L13'
+        }
+    };
 
     // ===== 模式偵測 =====
 
@@ -60,104 +81,197 @@ const ExcelGenerator = (() => {
         return new Uint8Array(buffer);
     }
 
-    // ===== 靜態 ExcelJS 模式 =====
+    // ===== 靜態 JSZip XML 修補模式 =====
+
+    let _templateCache = null;
 
     async function loadTemplate() {
+        if (_templateCache) return _templateCache;
         const response = await fetch('template/template.xlsx');
         if (!response.ok) throw new Error('無法載入範本檔案');
-        return await response.arrayBuffer();
+        _templateCache = await response.arrayBuffer();
+        return _templateCache;
+    }
+
+    /** XML 特殊字元跳脫 */
+    function escXml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     /**
-     * 安全設定儲存格值：
-     * - 公式儲存格：不覆蓋（保留原始公式）
-     * - value=null 時：清除資料（不清除公式儲存格）
+     * 設定 inlineStr 型儲存格的文字值。
+     * 支援：
+     *  (a) 原本就是 inlineStr → 替換文字
+     *  (b) 原本是空的 numeric (t="n") → 改為 inlineStr
      */
-    function setVal(ws, row, col, value) {
-        const cell = ws.getCell(row, col);
-        const isFormula = cell.value && typeof cell.value === 'object' && cell.value.formula;
-        if (isFormula) return; // 公式儲存格永不覆蓋
-        cell.value = value;
+    function patchStr(xml, cellRef, value) {
+        const esc = escXml(value);
+        // (a) 已是 inlineStr
+        const rxInline = new RegExp(
+            `(<c r="${cellRef}"[^>]*t="inlineStr"[^>]*><is><t[^>]*>)[^<]*(</t></is></c>)`
+        );
+        if (rxInline.test(xml)) {
+            return xml.replace(rxInline, `$1${esc}$2`);
+        }
+        // (b) 空的 numeric 儲存格 <c r="..." s="..." t="n"></c>
+        const rxEmptyN = new RegExp(
+            `(<c r="${cellRef}")([^>]*)t="n"([^>]*>)(</c>)`
+        );
+        if (rxEmptyN.test(xml)) {
+            return xml.replace(
+                rxEmptyN,
+                `$1$2t="inlineStr"$3<is><t xml:space="preserve">${esc}</t></is></c>`
+            );
+        }
+        // (c) numeric 有值的儲存格 <c ...><v>...</v></c>
+        const rxNumV = new RegExp(
+            `(<c r="${cellRef}")([^>]*)t="n"([^>]*>)<v>[^<]*</v>(</c>)`
+        );
+        return xml.replace(
+            rxNumV,
+            `$1$2t="inlineStr"$3<is><t xml:space="preserve">${esc}</t></is></c>`
+        );
     }
 
-    async function generateViaExcelJS(params) {
-        const templateData = await loadTemplate();
+    /**
+     * 清除 inlineStr 或 numeric 儲存格的值（保留樣式與型別）。
+     */
+    function clearStr(xml, cellRef) {
+        // inlineStr → 清空文字
+        const rxInline = new RegExp(
+            `(<c r="${cellRef}"[^>]*t="inlineStr"[^>]*><is><t[^>]*>)[^<]*(</t></is></c>)`
+        );
+        if (rxInline.test(xml)) {
+            return xml.replace(rxInline, '$1$2');
+        }
+        // numeric 有 <v> → 移除 <v>
+        return xml.replace(
+            new RegExp(`(<c r="${cellRef}"[^>]*>)<v>[^<]*</v>(</c>)`),
+            '$1$2'
+        );
+    }
 
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.load(templateData);
+    /**
+     * 設定數值型儲存格的值。
+     * 支援：有 <v> 的儲存格（替換）與空儲存格（插入）。
+     */
+    function patchNum(xml, cellRef, value) {
+        // 有 <v> → 替換
+        const rxHas = new RegExp(`(<c r="${cellRef}"[^>]*>)<v>[^<]*</v>(</c>)`);
+        if (rxHas.test(xml)) {
+            return xml.replace(rxHas, `$1<v>${value}</v>$2`);
+        }
+        // 空儲存格 → 插入 <v>
+        return xml.replace(
+            new RegExp(`(<c r="${cellRef}"[^>]*>)(</c>)`),
+            `$1<v>${value}</v>$2`
+        );
+    }
+
+    /** 清除數值型儲存格的值 */
+    function clearNum(xml, cellRef) {
+        return xml.replace(
+            new RegExp(`(<c r="${cellRef}"[^>]*>)<v>[^<]*</v>(</c>)`),
+            '$1$2'
+        );
+    }
+
+    async function generateViaJSZip(params) {
+        const templateData = await loadTemplate();
+        const zip = await JSZip.loadAsync(templateData);
 
         const sheetName = params.templateType;
-        const ws = workbook.getWorksheet(sheetName);
-        if (!ws) throw new Error(`找不到工作表「${sheetName}」`);
+        const cells = SHEET_CELLS[sheetName];
+        const sheetFile = SHEET_FILES[sheetName];
+        const otherFile = sheetName === '預算內'
+            ? SHEET_FILES['代收代辦']
+            : SHEET_FILES['預算內'];
 
-        // 設定開啟時顯示正確的工作表（0-indexed）
-        const activeIdx = workbook.worksheets.findIndex(s => s.name === sheetName);
-        workbook.views = [{ activeTab: activeIdx }];
+        if (!sheetFile) throw new Error(`未知的工作表類型：${sheetName}`);
 
-        // 清除另一張 sheet 的舊資料，避免混淆
-        const otherName = sheetName === '預算內' ? '代收代辦' : '預算內';
-        const wsOther = workbook.getWorksheet(otherName);
-        if (wsOther) {
-            for (const row of ITEM_ROWS) {
-                wsOther.getCell(row, 1).value = null;
-                wsOther.getCell(row, 3).value = null;
-                wsOther.getCell(row, 5).value = null;
-            }
-        }
+        // ===== 修補目標工作表 =====
+        let xml = await zip.file(sheetFile).async('string');
 
-        const items = params.items.slice(0, 8);
-
-        // 清除品項舊資料
+        // 清除所有品項列（避免殘留舊資料）
         for (const row of ITEM_ROWS) {
-            setVal(ws, row, 1, null);  // A = 名稱及規格
-            setVal(ws, row, 3, null);  // C = 數量
-            setVal(ws, row, 5, null);  // E = 單價
+            xml = clearStr(xml, `A${row}`);
+            xml = clearNum(xml,  `C${row}`);
+            xml = clearNum(xml,  `E${row}`);
         }
 
         // 填入品項
+        const items = params.items.slice(0, 8);
         for (let i = 0; i < items.length; i++) {
             const row = ITEM_ROWS[i];
             const item = items[i];
-            if (item.name)      setVal(ws, row, 1, item.name);
-            if (item.quantity)  setVal(ws, row, 3, Number(item.quantity));
-            if (item.unitPrice) setVal(ws, row, 5, Number(item.unitPrice));
+            if (item.name)      xml = patchStr(xml, `A${row}`, item.name);
+            if (item.quantity)  xml = patchNum(xml,  `C${row}`, Number(item.quantity));
+            if (item.unitPrice) xml = patchNum(xml,  `E${row}`, Number(item.unitPrice));
         }
 
-        // 用途說明（第 15 列）
-        if (params.purpose) {
-            const purposeCol = sheetName === '代收代辦' ? 10 : 9; // J=10, I=9
-            setVal(ws, 15, purposeCol, params.purpose);
-        }
+        // 用途說明
+        if (params.purpose) xml = patchStr(xml, cells.purposeCell, params.purpose);
 
         // 單位別（B13）
-        if (params.unit) setVal(ws, 13, 2, params.unit);
+        if (params.unit) xml = patchStr(xml, 'B13', params.unit);
 
-        // 月、日（年由公式自動帶入）
-        if (sheetName === '代收代辦') {
-            if (params.month) setVal(ws, 13, 10, Number(params.month)); // J13
-            if (params.day)   setVal(ws, 13, 12, Number(params.day));   // L13
-        } else {
-            if (params.month) setVal(ws, 13, 9,  Number(params.month)); // I13
-            if (params.day)   setVal(ws, 13, 11, Number(params.day));   // K13
-        }
+        // 月、日（年由公式 YEAR(TODAY())-1911 自動帶入）
+        if (params.month) xml = patchNum(xml, cells.monthCell, Number(params.month));
+        if (params.day)   xml = patchNum(xml, cells.dayCell,   Number(params.day));
 
         // 預算科目（B4, B5）
-        if (params.budgetCategory)    setVal(ws, 4, 2, params.budgetCategory);
-        if (params.budgetSubCategory) setVal(ws, 5, 2, params.budgetSubCategory);
+        if (params.budgetCategory)    xml = patchStr(xml, 'B4', params.budgetCategory);
+        if (params.budgetSubCategory) xml = patchStr(xml, 'B5', params.budgetSubCategory);
 
-        const buffer = await workbook.xlsx.writeBuffer();
-        return new Uint8Array(buffer);
+        zip.file(sheetFile, xml);
+
+        // ===== 清除另一張工作表的品項殘留 =====
+        if (otherFile && zip.file(otherFile)) {
+            let xmlOther = await zip.file(otherFile).async('string');
+            for (const row of ITEM_ROWS) {
+                xmlOther = clearStr(xmlOther, `A${row}`);
+                xmlOther = clearNum(xmlOther,  `C${row}`);
+                xmlOther = clearNum(xmlOther,  `E${row}`);
+            }
+            zip.file(otherFile, xmlOther);
+        }
+
+        // ===== 設定開啟時顯示正確工作表（workbook.xml） =====
+        const activeIdx = sheetName === '預算內' ? 1 : 0;
+        let wbXml = await zip.file('xl/workbook.xml').async('string');
+        wbXml = wbXml.replace(
+            /(<workbookView[^>]*)activeTab="\d+"([^>]*\/>)/,
+            `$1activeTab="${activeIdx}"$2`
+        );
+        if (!wbXml.includes('activeTab=')) {
+            wbXml = wbXml.replace(
+                /(<workbookView)([^>]*\/>)/,
+                `$1 activeTab="${activeIdx}"$2`
+            );
+        }
+        zip.file('xl/workbook.xml', wbXml);
+
+        const content = await zip.generateAsync({
+            type: 'uint8array',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 }
+        });
+        return content;
     }
 
     // ===== 主要入口 =====
 
     async function generate(params) {
         const pythonAvailable = await isPythonMode();
-
         if (pythonAvailable) {
             return await generateViaPython(params);
         } else {
-            return await generateViaExcelJS(params);
+            return await generateViaJSZip(params);
         }
     }
 
