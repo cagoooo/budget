@@ -194,11 +194,14 @@ const PDFParser = (() => {
                     result.items.push(item);
                     lastItemY = rowY;
                 } else if (item.name && result.items.length > 0) {
+                    // 過濾合計/總計行（非品項），避免合併進品名
+                    if (/總計|合計/.test(item.name)) continue;
                     // 沒有數量/單價但有名稱：若未跨段落則視為延續列
                     if (lastItemY === null || rowY === null || lastItemY - rowY <= 50) {
                         result.items[result.items.length - 1].name += ' ' + item.name;
                     }
                 } else if (item.name) {
+                    if (/總計|合計/.test(item.name)) continue;
                     result.items.push(item);
                 }
             } else {
@@ -231,11 +234,12 @@ const PDFParser = (() => {
             // 數量欄：支援「數量」「採購」「採購數量」等變體
             if (text === '數量' || text === '採購' || text === '採購數量') positions.qtyX = x;
             if (text === '單位') positions.unitX = x;
-            // 單價欄：支援「單價」「售價」
-            if (text === '單價' || text === '售價') positions.priceX = x;
+            // 單價欄：支援「單價」「售價」「報價」
+            if (text === '單價' || text === '售價' || text === '報價') positions.priceX = x;
             // 折扣欄：偵測後可精確限制單價右界
             if (text === '折扣' || text === '折讓') positions.discountX = x;
-            if (text === '小計') positions.subtotalX = x;
+            // 小計欄：支援「小計」「報價小計」「金額小計」等複合標題
+            if (text.includes('小計')) positions.subtotalX = x;
             if (text.includes('附註')) positions.noteX = x;
             // 作者 / 出版社欄：偵測到後可縮小品名右界
             if (text === '作者') positions.authorX = x;
