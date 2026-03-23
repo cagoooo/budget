@@ -310,6 +310,134 @@ const PDFParser = (() => {
         return texts.join(' ').trim();
     }
 
+    // ===== OCR 支援（掃描版 PDF）=====
+
+    /**
+     * 判斷是否為掃描版 PDF（文字稀少）
+     */
+    function isScannedPDF(textItems) {
+        const totalChars = textItems.reduce((sum, item) => sum + (item.str || '').length, 0);
+        return totalChars < 80;
+    }
+
+    /**
+     * 動態載入 Tesseract.js CDN（按需載入）
+     */
+    function loadTesseract() {
+        return new Promise((resolve, reject) => {
+            if (typeof Tesseract !== 'undefined') { resolve(); return; }
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/tesseract.js@4/dist/tesseract.min.js';
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('無法載入 OCR 引擎，請確認網路連線'));
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
+     * 將 PDF 頁面渲染成 canvas（scale=2 提高 OCR 精度）
+     */
+    async function renderPageToCanvas(page, scale = 2) {
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        return canvas;
+    }
+
+    /**
+     * 使用 Tesseract.js OCR 辨識掃描 PDF 的全部頁面
+     */
+    async function extractTextViaOCR(file, onProgress) {
+        await loadTesseract();
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const numPages = pdf.numPages;
+        const texts = [];
+
+        onProgress && onProgress('正在初始化 OCR 引擎（首次使用需下載語言包約 5MB）...');
+        const worker = await Tesseract.createWorker('chi_tra+eng', 1, {
+            logger: m => {
+                if (!onProgress) return;
+                if (m.status === 'loading tesseract core') onProgress('正在載入 OCR 核心...');
+                else if (m.status === 'loading language traineddata') onProgress('正在下載中文語言包...');
+                else if (m.status === 'recognizing text') {
+                    // 不在這裡更新，由外層 for 迴圈顯示頁碼
+                }
+            }
+        });
+
+        try {
+            for (let i = 1; i <= numPages; i++) {
+                onProgress && onProgress(`正在 OCR 辨識第 ${i} / ${numPages} 頁，請稍候...`);
+                const page = await pdf.getPage(i);
+                const canvas = await renderPageToCanvas(page, 2);
+                const { data: { text } } = await worker.recognize(canvas);
+                texts.push(text);
+            }
+        } finally {
+            await worker.terminate();
+        }
+
+        return texts.join('\n');
+    }
+
+    /**
+     * 解析 OCR 輸出文字為品項（比 parseByText 更寬鬆）
+     */
+    function parseOcrText(ocrText) {
+        const lines = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+
+        // 先嘗試原有的 parseByText 邏輯
+        const byText = parseByText(lines);
+        if (byText.length > 0) return byText;
+
+        // 更寬鬆的備用解析：每行找數字群組
+        const items = [];
+        let headerFound = false;
+
+        for (const line of lines) {
+            if (line.includes('以下空白')) break;
+
+            if (!headerFound) {
+                if (line.includes('品') && (line.includes('數量') || line.includes('單價') || line.includes('合計'))) {
+                    headerFound = true;
+                }
+                continue;
+            }
+
+            // 找出行內所有數字（忽略逗號格式）
+            const nums = [...line.matchAll(/([\d,]+(?:\.\d+)?)/g)]
+                .map(m => parseFloat(m[1].replace(/,/g, '')))
+                .filter(n => !isNaN(n) && n > 0);
+
+            if (nums.length < 2) continue;
+
+            // 移除數字和單位詞，剩下的視為品名
+            let name = line
+                .replace(/[\d,]+(?:\.\d+)?/g, '')
+                .replace(/[台個套式支張組份箱包瓶罐片條]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            // 移除開頭的序號和雜字
+            name = name.replace(/^[\s\d.\-|]+/, '').trim();
+
+            if (name.length >= 2) {
+                items.push({
+                    name,
+                    quantity: nums[0],
+                    unitPrice: nums[1],
+                    subtotal: Math.round(nums[0] * nums[1])
+                });
+            }
+        }
+
+        return items;
+    }
+
     /**
      * 備用：純文字模式解析（當座標解析失敗時使用）
      */
@@ -339,14 +467,36 @@ const PDFParser = (() => {
 
     /**
      * 主要入口：解析 PDF 檔案
+     * @param {File} file - PDF 檔案
+     * @param {Function} [onProgress] - 進度回呼 (message: string) => void
      */
-    async function parse(file) {
-        const items = await extractTextFromPDF(file);
-        const result = parseQuotation(items);
+    async function parse(file, onProgress) {
+        const textItems = await extractTextFromPDF(file);
 
-        // 如果座標解析沒有找到品項，嘗試文字模式
+        // A1：偵測掃描版 PDF，啟用 OCR
+        if (isScannedPDF(textItems)) {
+            onProgress && onProgress('偵測到掃描版 PDF，正在啟動 OCR 辨識...');
+            try {
+                const ocrText = await extractTextViaOCR(file, onProgress);
+                onProgress && onProgress('OCR 完成，正在解析品項...');
+                const result = {
+                    vendorName: '',
+                    quoteDate: '',
+                    totalAmount: 0,
+                    items: parseOcrText(ocrText)
+                };
+                return result;
+            } catch (err) {
+                console.warn('OCR 失敗，改用純文字模式：', err);
+                // 繼續使用一般解析（可能結果為空，讓使用者手動新增）
+            }
+        }
+
+        const result = parseQuotation(textItems);
+
+        // 座標解析失敗時改用純文字模式
         if (result.items.length === 0) {
-            const rows = groupIntoRows(items);
+            const rows = groupIntoRows(textItems);
             const textRows = rows.map(r => rowToText(r));
             result.items = parseByText(textRows);
         }

@@ -1,6 +1,6 @@
 # 動支及黏存單自動產生系統
 
-> 桃園市龍潭區石門國民小學 — 開源行政工具　　![版本](https://img.shields.io/badge/版本-v1.3.0-blue) ![授權](https://img.shields.io/badge/授權-MIT-green)
+> 桃園市龍潭區石門國民小學 — 開源行政工具　　![版本](https://img.shields.io/badge/版本-v1.4.0-blue) ![授權](https://img.shields.io/badge/授權-MIT-green)
 >
 > Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/tadnews/page.php?ncsn=11&nsn=16#a5)
 
@@ -132,6 +132,7 @@ Budget/
 
 | 版本 | 日期 | 內容 |
 |------|------|------|
+| v1.4.0 | 2026-03-23 | 掃描版 PDF OCR 支援（Tesseract.js，按需載入）；超過 8 筆品項 UI 警告；LocalStorage 記憶上次填寫的單位別、表單類型、預算科目 |
 | v1.3.0 | 2026-03-23 | 靜態模式改用 JSZip 直接修補 XML，根除 ExcelJS 產出 XML 損壞問題；加入版權 footer |
 | v1.2.0 | 2026-03-22 | 靜態模式升級為 ExcelJS；新增 favicon、OG 社群分享圖；完整說明文件 |
 | v1.1.0 | 2026-03-22 | 加入本地 Python 模式（openpyxl）；修正 Excel 開啟時顯示空白問題 |
@@ -173,6 +174,7 @@ git push
 | 技術 | 版本 | 用途 |
 |------|------|------|
 | PDF.js | 3.11.174 | PDF 文字座標擷取 |
+| Tesseract.js | 4.x | 掃描版 PDF OCR 辨識（按需載入，支援繁中）|
 | JSZip | 3.10.1 | 靜態模式 xlsx ZIP 結構直接修補 |
 | openpyxl | 最新版 | 本地模式 Excel 格式保留填寫 |
 | Python | 3.8+ | 本地 HTTP 伺服器（ThreadedHTTPServer）|

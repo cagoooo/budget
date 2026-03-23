@@ -49,10 +49,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let parsedData = null;
     let currentFile = null;
 
-    // ===== 初始化日期 =====
+    // ===== 初始化 =====
     initDate();
-
-    // ===== 偵測運行模式 =====
+    initLocalStorage();   // A4：含 updateCategorySelects()
     initModeDetection();
 
     // ===== 事件綁定 =====
@@ -111,6 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     templateType.addEventListener('change', () => {
         updateCategorySelects();
         updatePreview();
+        saveSettings();
     });
 
     // 產生 Excel
@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 監聽表單變更以更新預覽
-    document.getElementById('unitSelect').addEventListener('change', updatePreview);
+    document.getElementById('unitSelect').addEventListener('change', () => { updatePreview(); saveSettings(); });
     purposeInput.addEventListener('input', updatePreview);
     document.getElementById('dateYear').addEventListener('input', updatePreview);
     document.getElementById('dateMonth').addEventListener('input', updatePreview);
@@ -127,13 +127,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('budgetCategory').addEventListener('change', () => {
         updateSubCategory('預算內');
         updatePreview();
+        saveSettings();
     });
-    document.getElementById('budgetSubCategory').addEventListener('change', updatePreview);
+    document.getElementById('budgetSubCategory').addEventListener('change', () => { updatePreview(); saveSettings(); });
     document.getElementById('agencyCategory').addEventListener('change', () => {
         updateSubCategory('代收代辦');
         updatePreview();
+        saveSettings();
     });
-    document.getElementById('agencySubCategory').addEventListener('change', updatePreview);
+    document.getElementById('agencySubCategory').addEventListener('change', () => { updatePreview(); saveSettings(); });
 
     // ===== 核心函式 =====
 
@@ -146,13 +148,23 @@ document.addEventListener('DOMContentLoaded', () => {
         showLoading('正在解析 PDF 報價單...');
 
         try {
-            parsedData = await PDFParser.parse(file);
+            parsedData = await PDFParser.parse(file, (msg) => showLoading(msg));
             hideLoading();
 
-            if (parsedData.items.length === 0) {
+            const count = parsedData.items.length;
+            if (count === 0) {
                 showToast('未能從 PDF 中解析出品項資料，請手動新增', 'error');
             } else {
-                showToast(`成功解析 ${parsedData.items.length} 筆品項`, 'success');
+                showToast(`成功解析 ${count} 筆品項`, 'success');
+            }
+
+            // A3：超過 8 筆品項警告
+            const warningBox = document.getElementById('overLimitWarning');
+            if (count > 8) {
+                document.getElementById('totalItemCount').textContent = count;
+                warningBox.style.display = 'flex';
+            } else {
+                warningBox.style.display = 'none';
             }
 
             displayParsedData(parsedData);
@@ -339,6 +351,61 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
+    }
+
+    // ===== A4：LocalStorage 記憶設定 =====
+
+    const LS_PREFIX = 'smes_budget_';
+    const LS_FIELDS = ['templateType', 'unitSelect', 'budgetCategory', 'budgetSubCategory', 'agencyCategory', 'agencySubCategory'];
+
+    function saveSettings() {
+        try {
+            LS_FIELDS.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) localStorage.setItem(LS_PREFIX + id, el.value);
+            });
+        } catch {}
+    }
+
+    function initLocalStorage() {
+        try {
+            // 還原表單類型（需先還原才能初始化科目選單）
+            const savedType = localStorage.getItem(LS_PREFIX + 'templateType');
+            if (savedType) {
+                const el = document.getElementById('templateType');
+                if (el) el.value = savedType;
+            }
+
+            // 還原單位別
+            const savedUnit = localStorage.getItem(LS_PREFIX + 'unitSelect');
+            if (savedUnit) {
+                const el = document.getElementById('unitSelect');
+                if (el) el.value = savedUnit;
+            }
+
+            // 初始化科目選單（基於已還原的表單類型）
+            updateCategorySelects();
+
+            // 還原一級科目
+            const type = document.getElementById('templateType').value;
+            const catId = type === '預算內' ? 'budgetCategory' : 'agencyCategory';
+            const savedCat = localStorage.getItem(LS_PREFIX + catId);
+            if (savedCat) {
+                const el = document.getElementById(catId);
+                if (el) {
+                    el.value = savedCat;
+                    updateSubCategory(type);
+                }
+            }
+
+            // 還原二級科目
+            const subCatId = type === '預算內' ? 'budgetSubCategory' : 'agencySubCategory';
+            const savedSubCat = localStorage.getItem(LS_PREFIX + subCatId);
+            if (savedSubCat) {
+                const el = document.getElementById(subCatId);
+                if (el) el.value = savedSubCat;
+            }
+        } catch {}
     }
 
     // ===== 日期初始化 =====
