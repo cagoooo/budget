@@ -120,13 +120,16 @@ const PDFParser = (() => {
             }
         }
 
-        // 找出表頭列（含「品 名」或「品名」）以及「以下空白」列
+        // 找出表頭列（含「品名」）以及「以下空白」列
         let headerRowIdx = -1;
         let endRowIdx = textRows.length;
 
         for (let i = 0; i < textRows.length; i++) {
             const t = textRows[i];
-            if (t.includes('品') && t.includes('名') && (t.includes('數量') || t.includes('單位') || t.includes('單價'))) {
+            // 同一行有「品名」且有數量/單價/售價/小計其中一個即可
+            if (t.includes('品') && t.includes('名') &&
+                (t.includes('數量') || t.includes('單位') || t.includes('單價') ||
+                 t.includes('售價') || t.includes('小計'))) {
                 headerRowIdx = i;
             }
             if (t.includes('以下空白')) {
@@ -148,11 +151,24 @@ const PDFParser = (() => {
         if (headerRowIdx === -1) return result;
 
         // 分析表頭欄位位置（使用 X 座標）
-        const headerRow = rows[headerRowIdx];
-        const headerPositions = analyzeHeaderPositions(headerRow);
+        // 支援跨兩行的表頭（如「採購\n數量」分列）
+        let headerItemsForAnalysis = [...rows[headerRowIdx]];
+        let dataStartRow = headerRowIdx + 1;
+        if (dataStartRow < endRowIdx) {
+            const nextText = textRows[dataStartRow];
+            // 若下一行含欄位關鍵字且沒有大數字（非資料列）→ 視為表頭延續列
+            const hasColKeywords = nextText.includes('數量') || nextText.includes('定價') ||
+                                   nextText.includes('交期') || nextText.includes('單位');
+            const hasProductData = /\d{5,}/.test(nextText); // 5位以上數字 → 資料列
+            if (hasColKeywords && !hasProductData) {
+                headerItemsForAnalysis = [...headerItemsForAnalysis, ...rows[dataStartRow]];
+                dataStartRow++;
+            }
+        }
+        const headerPositions = analyzeHeaderPositions(headerItemsForAnalysis);
 
         // 解析資料列（支援多行品名合併）
-        for (let i = headerRowIdx + 1; i < endRowIdx; i++) {
+        for (let i = dataStartRow; i < endRowIdx; i++) {
             const row = rows[i];
             const text = rowToText(row);
 
@@ -163,8 +179,10 @@ const PDFParser = (() => {
             const item = parseItemRow(row, headerPositions, text);
             if (item) {
                 if (item.quantity !== 0 || item.unitPrice !== 0) {
-                    // 有數量或單價的正常品項列
-                    result.items.push(item);
+                    // 有數量或單價的正常品項列（排除數量=0 的「不採購」品項）
+                    if (item.quantity > 0 || item.unitPrice > 0) {
+                        result.items.push(item);
+                    }
                 } else if (item.name && result.items.length > 0) {
                     // 沒有數量/單價但有名稱：視為上一品項的延續（多行品名）
                     result.items[result.items.length - 1].name += ' ' + item.name;
@@ -197,23 +215,33 @@ const PDFParser = (() => {
             if (text === '序') positions.seqX = x;
             if (text.includes('貨品編號')) positions.codeX = x;
             if (text.includes('品') && text.includes('名')) positions.nameX = x;
-            if (text === '數量') positions.qtyX = x;
+            // 數量欄：支援「數量」「採購數量」等變體
+            if (text === '數量' || text === '採購' || text === '採購數量') positions.qtyX = x;
             if (text === '單位') positions.unitX = x;
-            if (text === '單價') positions.priceX = x;
+            // 單價欄：支援「單價」「售價」
+            if (text === '單價' || text === '售價') positions.priceX = x;
             if (text === '小計') positions.subtotalX = x;
             if (text.includes('附註')) positions.noteX = x;
+            // 作者 / 出版社欄：偵測到後可縮小品名區域
+            if (text === '作者') positions.authorX = x;
+            if (text === '出版社') positions.publisherX = x;
         }
 
-        // 計算各欄位的邊界值（使用相鄰欄位的中點）
+        // 計算各欄位的邊界值
         const qtyX = positions.qtyX || 300;
         const unitX = positions.unitX || qtyX + 40;
         const priceX = positions.priceX || unitX + 40;
         const subtotalX = positions.subtotalX || priceX + 60;
 
+        // 若有作者欄，品名右界縮到作者欄左側（避免把作者/出版社混入品名）
+        const nameEndX = positions.authorX
+            ? positions.authorX - 5
+            : qtyX - 5;
+
         return {
-            // 品名區域：貨品編號右側到數量左側
+            // 品名區域
             nameStart: (positions.codeX || 40) + 30,
-            nameEnd: qtyX - 5,
+            nameEnd: nameEndX,
             // 數量區域
             qtyStart: qtyX - 15,
             qtyEnd: unitX - 5,
@@ -240,6 +268,25 @@ const PDFParser = (() => {
      */
     function isSeqNumber(text) {
         return /^\d{1,2}$/.test(text);
+    }
+
+    /**
+     * 判斷文字是否為 ISBN-13（978/979 開頭的 13 位數字）
+     */
+    function isISBN13(text) {
+        return /^97[89]\d{10}$/.test(text.replace(/[-\s]/g, ''));
+    }
+
+    /**
+     * 判斷文字是否為應忽略的數字型雜訊（如定價、ISBN、百分比）
+     * 用於品名欄位過濾
+     */
+    function isNameNoise(text) {
+        if (isISBN13(text)) return true;          // ISBN-13
+        if (/^\d+%$/.test(text)) return true;     // 折扣百分比 (79%)
+        if (/^\d{3,}$/.test(text)) return true;   // 3位以上純數字（定價、編號等）
+        if (/^\d{1,3}(,\d{3})+$/.test(text)) return true; // 千分位數字 (1,188)
+        return false;
     }
 
     /**
@@ -270,8 +317,9 @@ const PDFParser = (() => {
                 const parsed = parseFloat(text.replace(/,/g, ''));
                 if (!isNaN(parsed)) subtotal = parsed;
             } else if (x >= bounds.nameStart - 30 && x < bounds.nameEnd) {
-                // 品名區域（較寬鬆的左邊界，因為品名可能從較左位置開始）
-                if (!isSeqNumber(text) && !isProductCode(text)) {
+                // 品名區域（較寬鬆的左邊界）
+                // 過濾：序號、貨品編號、ISBN、定價數字、百分比等雜訊
+                if (!isSeqNumber(text) && !isProductCode(text) && !isNameNoise(text)) {
                     nameTexts.push(text);
                 }
             }
