@@ -224,6 +224,9 @@ const ExcelGenerator = (() => {
         if (params.month) xml = patchNum(xml, cells.monthCell, Number(params.month));
         if (params.day)   xml = patchNum(xml, cells.dayCell,   Number(params.day));
 
+        // 所屬年度（B2）
+        if (params.year) xml = patchNum(xml, 'B2', Number(params.year));
+
         // 預算科目（B4, B5）
         if (params.budgetCategory)    xml = patchStr(xml, 'B4', params.budgetCategory);
         if (params.budgetSubCategory) xml = patchStr(xml, 'B5', params.budgetSubCategory);

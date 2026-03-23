@@ -91,6 +91,11 @@ def fill_data(ws, data, cols):
         if price:
             ws[f"{cols['price']}{row}"].value = price
 
+    # 所屬年度（B2）
+    year = data.get('year')
+    if year:
+        ws['B2'].value = int(year)
+
     # 用途說明（第 15 列）
     purpose = data.get('purpose', '')
     if purpose:
