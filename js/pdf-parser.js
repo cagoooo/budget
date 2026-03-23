@@ -215,41 +215,60 @@ const PDFParser = (() => {
             if (text === '序') positions.seqX = x;
             if (text.includes('貨品編號')) positions.codeX = x;
             if (text.includes('品') && text.includes('名')) positions.nameX = x;
-            // 數量欄：支援「數量」「採購數量」等變體
+            // 數量欄：支援「數量」「採購」「採購數量」等變體
             if (text === '數量' || text === '採購' || text === '採購數量') positions.qtyX = x;
             if (text === '單位') positions.unitX = x;
             // 單價欄：支援「單價」「售價」
             if (text === '單價' || text === '售價') positions.priceX = x;
+            // 折扣欄：偵測後可精確限制單價右界
+            if (text === '折扣' || text === '折讓') positions.discountX = x;
             if (text === '小計') positions.subtotalX = x;
             if (text.includes('附註')) positions.noteX = x;
-            // 作者 / 出版社欄：偵測到後可縮小品名區域
+            // 作者 / 出版社欄：偵測到後可縮小品名右界
             if (text === '作者') positions.authorX = x;
             if (text === '出版社') positions.publisherX = x;
         }
 
-        // 計算各欄位的邊界值
         const qtyX = positions.qtyX || 300;
-        const unitX = positions.unitX || qtyX + 40;
-        const priceX = positions.priceX || unitX + 40;
+        const unitX = positions.unitX || null;
+        const priceX = positions.priceX || (unitX ? unitX + 40 : qtyX + 40);
+        const discountX = positions.discountX || null;
         const subtotalX = positions.subtotalX || priceX + 60;
 
-        // 若有作者欄，品名右界縮到作者欄左側（避免把作者/出版社混入品名）
-        const nameEndX = positions.authorX
-            ? positions.authorX - 5
-            : qtyX - 5;
+        // ---- 使用「相鄰欄位中點」作為邊界，避免固定偏移量造成範圍重疊 ----
+
+        // 品名右界：使用品名欄與作者欄的中點（避免作者資料混入品名）
+        const nameEndX = positions.authorX && positions.nameX
+            ? (positions.nameX + positions.authorX) / 2
+            : positions.authorX
+                ? positions.authorX - 5
+                : qtyX - 5;
+
+        // 數量 ↔ 單價 中點
+        const qtyPriceMid = (qtyX + priceX) / 2;
+
+        // 單價右界：若有折扣欄則取 price↔discount 中點，否則取 price↔subtotal 中點
+        const priceEndX = discountX
+            ? (priceX + discountX) / 2
+            : (priceX + subtotalX) / 2;
+
+        // 小計左界：若有折扣欄則取 discount↔subtotal 中點
+        const subtotalStartX = discountX
+            ? (discountX + subtotalX) / 2
+            : subtotalX - 15;
 
         return {
             // 品名區域
             nameStart: (positions.codeX || 40) + 30,
             nameEnd: nameEndX,
-            // 數量區域
-            qtyStart: qtyX - 15,
-            qtyEnd: unitX - 5,
-            // 單價區域
-            priceStart: priceX - 30,
-            priceEnd: subtotalX - 10,
+            // 數量區域（左界到 qty↔price 中點）
+            qtyStart: unitX ? (unitX + qtyX) / 2 : qtyX - 20,
+            qtyEnd: qtyPriceMid,
+            // 單價區域（qty↔price 中點 到 price 右界）
+            priceStart: qtyPriceMid,
+            priceEnd: priceEndX,
             // 小計區域
-            subtotalStart: subtotalX - 15,
+            subtotalStart: subtotalStartX,
             subtotalEnd: (positions.noteX || subtotalX + 80) - 5,
             // 序號/貨品編號區域
             codeEnd: (positions.codeX || 40) + 80
@@ -305,13 +324,17 @@ const PDFParser = (() => {
 
             // 根據 X 座標判斷此文字屬於哪個欄位
             if (x >= bounds.qtyStart && x < bounds.qtyEnd) {
-                // 數量區域
-                const parsed = parseFloat(text);
-                if (!isNaN(parsed)) qty = parsed;
+                // 數量區域：過濾 ISBN、百分比、異常大數（如 ISBN 流入）
+                if (!isISBN13(text) && !/^\d+%$/.test(text)) {
+                    const parsed = parseFloat(text.replace(/,/g, ''));
+                    if (!isNaN(parsed) && parsed < 100000) qty = parsed;
+                }
             } else if (x >= bounds.priceStart && x < bounds.priceEnd) {
-                // 單價區域
-                const parsed = parseFloat(text.replace(/,/g, ''));
-                if (!isNaN(parsed)) price = parsed;
+                // 單價區域：過濾百分比（折扣欄）
+                if (!/^\d+%$/.test(text)) {
+                    const parsed = parseFloat(text.replace(/,/g, ''));
+                    if (!isNaN(parsed)) price = parsed;
+                }
             } else if (x >= bounds.subtotalStart && x <= bounds.subtotalEnd) {
                 // 小計區域
                 const parsed = parseFloat(text.replace(/,/g, ''));
