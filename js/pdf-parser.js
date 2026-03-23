@@ -148,6 +148,17 @@ const PDFParser = (() => {
             }
         }
 
+        if (headerRowIdx === -1) {
+            // 後備：服務型報價單（有「數量」+「單價」或「總價」，但無「品名」）
+            for (let i = 0; i < textRows.length; i++) {
+                const t = textRows[i];
+                if (t.includes('數量') && (t.includes('單價') || t.includes('總價') || t.includes('金額'))) {
+                    headerRowIdx = i;
+                    break;
+                }
+            }
+        }
+
         if (headerRowIdx === -1) return result;
 
         // 分析表頭欄位位置（使用 X 座標）
@@ -234,12 +245,12 @@ const PDFParser = (() => {
             // 數量欄：支援「數量」「採購」「採購數量」等變體
             if (text === '數量' || text === '採購' || text === '採購數量') positions.qtyX = x;
             if (text === '單位') positions.unitX = x;
-            // 單價欄：支援「單價」「售價」「報價」
-            if (text === '單價' || text === '售價' || text === '報價') positions.priceX = x;
+            // 單價欄：支援「單價」「單價($)」「售價」「報價」等（用 includes 支援複合標題）
+            if (text.includes('單價') || text === '售價' || text === '報價') positions.priceX = x;
             // 折扣欄：偵測後可精確限制單價右界
             if (text === '折扣' || text === '折讓') positions.discountX = x;
-            // 小計欄：支援「小計」「報價小計」「金額小計」等複合標題
-            if (text.includes('小計')) positions.subtotalX = x;
+            // 小計欄：支援「小計」「報價小計」「總價」「金額」等
+            if (text.includes('小計') || text === '總價' || text === '金額') positions.subtotalX = x;
             if (text.includes('附註')) positions.noteX = x;
             // 作者 / 出版社欄：偵測到後可縮小品名右界
             if (text === '作者') positions.authorX = x;
@@ -338,10 +349,12 @@ const PDFParser = (() => {
      * 用於品名欄位過濾
      */
     function isNameNoise(text) {
-        if (isISBN13(text)) return true;          // ISBN-13
-        if (/^\d+%$/.test(text)) return true;     // 折扣百分比 (79%)
-        if (/^\d{3,}$/.test(text)) return true;   // 3位以上純數字（定價、編號等）
-        if (/^\d{1,3}(,\d{3})+$/.test(text)) return true; // 千分位數字 (1,188)
+        if (isISBN13(text)) return true;                    // ISBN-13
+        if (/^\d+%$/.test(text)) return true;               // 折扣百分比 (79%)
+        if (/^\d{3,}$/.test(text)) return true;             // 3位以上純數字（定價、編號等）
+        if (/^\d{1,3}(,\d{3})+$/.test(text)) return true;  // 千分位數字 (1,188)
+        if (/^\d+年$/.test(text)) return true;              // 使用年限 (4年)
+        if (/^\$[\d,]+$/.test(text)) return true;           // 含 $ 的金額字串（單價欄溢出至品名區）
         return false;
     }
 
@@ -367,14 +380,14 @@ const PDFParser = (() => {
                     if (!isNaN(parsed) && parsed < 100000) qty = parsed;
                 }
             } else if (x >= bounds.priceStart && x < bounds.priceEnd) {
-                // 單價區域：過濾百分比（折扣欄）
+                // 單價區域：過濾百分比（折扣欄），支援含 $ 的格式（如 $1,200）
                 if (!/^\d+%$/.test(text)) {
-                    const parsed = parseFloat(text.replace(/,/g, ''));
+                    const parsed = parseFloat(text.replace(/[$,]/g, ''));
                     if (!isNaN(parsed)) price = parsed;
                 }
             } else if (x >= bounds.subtotalStart && x <= bounds.subtotalEnd) {
-                // 小計區域
-                const parsed = parseFloat(text.replace(/,/g, ''));
+                // 小計區域：支援含 $ 的格式（如 $72,000）
+                const parsed = parseFloat(text.replace(/[$,]/g, ''));
                 if (!isNaN(parsed)) subtotal = parsed;
             } else if (x >= bounds.nameStart - 30 && x < bounds.nameEnd) {
                 // 品名區域（較寬鬆的左邊界）
