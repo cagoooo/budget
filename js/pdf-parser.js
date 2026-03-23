@@ -168,33 +168,46 @@ const PDFParser = (() => {
         const headerPositions = analyzeHeaderPositions(headerItemsForAnalysis);
 
         // 解析資料列（支援多行品名合併）
+        let lastItemY = null; // 最後一筆有 qty/price 品項的 Y 座標（用於偵測跨段落跳躍）
         for (let i = dataStartRow; i < endRowIdx; i++) {
             const row = rows[i];
             const text = rowToText(row);
 
-            // 跳過空白列
+            // 跳過空白列與頁腳/條款文字（付款方式、交貨時間等）
             if (!text.trim() || text === '以下空白') continue;
+            if (isFooterText(text)) continue;
+
+            const rowY = row[0] ? row[0].transform[5] : null;
 
             // 解析品項
             const item = parseItemRow(row, headerPositions, text);
             if (item) {
-                if (item.quantity !== 0 || item.unitPrice !== 0) {
-                    // 有數量或單價的正常品項列（排除數量=0 的「不採購」品項）
-                    if (item.quantity > 0 || item.unitPrice > 0) {
-                        result.items.push(item);
+                if (item.quantity > 0 || item.unitPrice > 0) {
+                    // 若前一品項只有品名（無qty/price），合併品名至本列
+                    if (result.items.length > 0) {
+                        const prev = result.items[result.items.length - 1];
+                        if (prev.quantity === 0 && prev.unitPrice === 0) {
+                            item.name = (prev.name + ' ' + item.name).trim();
+                            result.items.pop();
+                        }
                     }
+                    result.items.push(item);
+                    lastItemY = rowY;
                 } else if (item.name && result.items.length > 0) {
-                    // 沒有數量/單價但有名稱：視為上一品項的延續（多行品名）
-                    result.items[result.items.length - 1].name += ' ' + item.name;
+                    // 沒有數量/單價但有名稱：若未跨段落則視為延續列
+                    if (lastItemY === null || rowY === null || lastItemY - rowY <= 50) {
+                        result.items[result.items.length - 1].name += ' ' + item.name;
+                    }
                 } else if (item.name) {
                     result.items.push(item);
                 }
             } else {
-                // parseItemRow 回傳 null，但可能是品名延續列
-                // 檢查此列是否只有文字落在品名區域
+                // parseItemRow 回傳 null：嘗試擷取延續品名
                 const contName = extractContinuationName(row, headerPositions);
                 if (contName && result.items.length > 0) {
-                    result.items[result.items.length - 1].name += ' ' + contName;
+                    if (lastItemY === null || rowY === null || lastItemY - rowY <= 50) {
+                        result.items[result.items.length - 1].name += ' ' + contName;
+                    }
                 }
             }
         }
@@ -268,8 +281,8 @@ const PDFParser = (() => {
             : subtotalX - 15;
 
         return {
-            // 品名區域
-            nameStart: (positions.codeX || 40) + 30,
+            // 品名區域（seqX 可作為 codeX 的後備，避免貨品編號欄外的文字混入品名）
+            nameStart: (positions.codeX || positions.seqX || 40) + 30,
             nameEnd: nameEndX,
             // 數量區域：左界固定為 qtyX-20（避免受 unitX 位置影響）
             qtyStart: qtyX - 20,
@@ -297,6 +310,16 @@ const PDFParser = (() => {
      */
     function isSeqNumber(text) {
         return /^\d{1,2}$/.test(text);
+    }
+
+    /**
+     * 判斷文字是否為頁腳/條款內容（付款方式、交貨時間等），不屬於品項
+     */
+    function isFooterText(text) {
+        return /付款方式|匯款資料|交貨時間|有效期限|承辦業務|取消訂單|採購雙方|Signature/.test(text)
+            || /帳號[：:]\s*\d/.test(text)
+            || /銀行[：:]\s*[\u4e00-\u9fff]/.test(text)
+            || /^\d[・.、]\s*[\u4e00-\u9fff]/.test(text);  // 1・付款... 條款序號
     }
 
     /**
@@ -361,7 +384,7 @@ const PDFParser = (() => {
 
         const name = nameTexts.join(' ').trim();
         if (!name && qty === 0 && price === 0) return null;
-        if (!name) return null;
+        // 有數量或單價時仍回傳（品名可由相鄰列補入）
 
         if (subtotal === 0 && qty !== 0 && price !== 0) {
             subtotal = Math.round(qty * price);
