@@ -244,8 +244,18 @@ const PDFParser = (() => {
                 ? positions.authorX - 5
                 : qtyX - 5;
 
-        // 數量 ↔ 單價 中點
-        const qtyPriceMid = (qtyX + priceX) / 2;
+        // 「單位」欄是否夾在「數量」與「單價」之間（qty < unit < price）
+        const hasUnitBetween = unitX && unitX > qtyX && unitX < priceX;
+
+        // 數量右界：若單位欄夾在中間，用 qty↔unit 中點；否則用 qty↔price 中點
+        const qtyEndX = hasUnitBetween
+            ? (qtyX + unitX) / 2
+            : (qtyX + priceX) / 2;
+
+        // 單價左界：若單位欄夾在中間，用 unit↔price 中點；否則用 qty↔price 中點
+        const priceStartX = hasUnitBetween
+            ? (unitX + priceX) / 2
+            : (qtyX + priceX) / 2;
 
         // 單價右界：若有折扣欄則取 price↔discount 中點，否則取 price↔subtotal 中點
         const priceEndX = discountX
@@ -261,11 +271,11 @@ const PDFParser = (() => {
             // 品名區域
             nameStart: (positions.codeX || 40) + 30,
             nameEnd: nameEndX,
-            // 數量區域（左界到 qty↔price 中點）
-            qtyStart: unitX ? (unitX + qtyX) / 2 : qtyX - 20,
-            qtyEnd: qtyPriceMid,
-            // 單價區域（qty↔price 中點 到 price 右界）
-            priceStart: qtyPriceMid,
+            // 數量區域：左界固定為 qtyX-20（避免受 unitX 位置影響）
+            qtyStart: qtyX - 20,
+            qtyEnd: qtyEndX,
+            // 單價區域
+            priceStart: priceStartX,
             priceEnd: priceEndX,
             // 小計區域
             subtotalStart: subtotalStartX,
