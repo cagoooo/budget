@@ -217,6 +217,12 @@ const ExcelGenerator = (() => {
         // 用途說明
         if (params.purpose) xml = patchStr(xml, cells.purposeCell, params.purpose);
 
+        // 黏存單用途說明格：確保自動換行格式
+        // 代收代辦(sheet1) P4 原樣式 s=147 無 wrapText → 改為 s=148（同屬性但有 wrapText）
+        xml = xml.replace(/<c r="P4" s="147"/, '<c r="P4" s="148"');
+        // 移除 row 4 固定高度限制，讓 Excel 依內容自動展開
+        xml = xml.replace(/(<row r="4"[^>]*)\bcustomHeight="1"\b/, '$1');
+
         // 單位別（B13）
         if (params.unit) xml = patchStr(xml, 'B13', params.unit);
 
