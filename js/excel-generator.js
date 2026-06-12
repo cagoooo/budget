@@ -181,6 +181,24 @@ const ExcelGenerator = (() => {
         );
     }
 
+    /**
+     * 設定工作表的選取狀態（tabSelected）。
+     * 解除「工作表群組」的關鍵：確保只有作用中工作表被選取，
+     * 否則 active 與 selected 不一致時 Excel 會把多張表湊成群組，
+     * 一按列印就全部一起印出。
+     */
+    function setTabSelected(xml, selected) {
+        const val = selected ? '1' : '0';
+        if (/<sheetView\b[^>]*\btabSelected="[01]"/.test(xml)) {
+            return xml.replace(
+                /(<sheetView\b[^>]*\b)tabSelected="[01]"/,
+                `$1tabSelected="${val}"`
+            );
+        }
+        // 範本若無 tabSelected 屬性 → 補上
+        return xml.replace(/(<sheetView\b)/, `$1 tabSelected="${val}"`);
+    }
+
     async function generateViaJSZip(params) {
         const templateData = await loadTemplate();
         const zip = await JSZip.loadAsync(templateData);
@@ -237,6 +255,9 @@ const ExcelGenerator = (() => {
         if (params.budgetCategory)    xml = patchStr(xml, 'B4', params.budgetCategory);
         if (params.budgetSubCategory) xml = patchStr(xml, 'B5', params.budgetSubCategory);
 
+        // 解除工作表群組：本表設為唯一被選取的工作表
+        xml = setTabSelected(xml, true);
+
         zip.file(sheetFile, xml);
 
         // ===== 清除另一張工作表的品項殘留 =====
@@ -247,6 +268,8 @@ const ExcelGenerator = (() => {
                 xmlOther = clearNum(xmlOther,  `C${row}`);
                 xmlOther = clearNum(xmlOther,  `E${row}`);
             }
+            // 解除工作表群組：另一張表取消選取
+            xmlOther = setTabSelected(xmlOther, false);
             zip.file(otherFile, xmlOther);
         }
 

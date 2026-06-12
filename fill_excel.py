@@ -144,6 +144,11 @@ def process(input_path, data, output_path):
         other_cols = SHEET_COLUMNS[other_name]
         clear_item_rows(ws_other, other_cols)
 
+    # 解除工作表群組：確保只有作用中工作表被選取，
+    # 否則 active 與 selected 不一致時 Excel 會把多張表湊成群組，列印時全部一起印出
+    for s in wb.worksheets:
+        s.sheet_view.tabSelected = (s.title == sheet_name)
+
     wb.save(output_path)
     return output_path
 
