@@ -14,6 +14,11 @@ import os
 from copy import copy
 import openpyxl
 from openpyxl import load_workbook
+from openpyxl.styles import Alignment
+
+
+# 黏存單（黏貼憑證用紙）用途說明格：以公式帶入動支區用途說明，需自動換行
+VOUCHER_CELL = {'代收代辦': 'P4', '預算內': 'O4'}
 
 
 # 品項所在列號（1-indexed）
@@ -123,6 +128,23 @@ def fill_data(ws, data, cols):
         ws[f"{cols['cat_col']}{cols['sub_row']}"].value = sub
 
 
+def set_voucher_wrap(ws, sheet_name):
+    """讓黏存單用途說明格自動換行（保留原置中對齊），並解除 row 4 固定列高"""
+    cell_ref = VOUCHER_CELL.get(sheet_name)
+    if not cell_ref:
+        return
+    cell = ws[cell_ref]
+    al = cell.alignment
+    cell.alignment = Alignment(
+        horizontal=al.horizontal or 'center',
+        vertical=al.vertical or 'center',
+        wrap_text=True,
+    )
+    if 4 in ws.row_dimensions:
+        # customHeight 為唯讀屬性，清掉 height 即解除固定列高
+        ws.row_dimensions[4].height = None
+
+
 def process(input_path, data, output_path):
     """主處理函式"""
     wb = load_workbook(input_path)
@@ -143,6 +165,11 @@ def process(input_path, data, output_path):
         ws_other = wb[other_name]
         other_cols = SHEET_COLUMNS[other_name]
         clear_item_rows(ws_other, other_cols)
+
+    # 黏存單用途說明格自動換行（兩張表都套用，保持檔案一致）
+    set_voucher_wrap(ws, sheet_name)
+    if other_name in wb.sheetnames:
+        set_voucher_wrap(wb[other_name], other_name)
 
     # 解除工作表群組：確保只有作用中工作表被選取，
     # 否則 active 與 selected 不一致時 Excel 會把多張表湊成群組，列印時全部一起印出

@@ -41,6 +41,15 @@ const ExcelGenerator = (() => {
         }
     };
 
+    // 黏存單（黏貼憑證用紙）用途說明格：以公式帶入動支區用途說明。
+    // 範本原樣式無 wrapText，長字串不會自動換行，需改指向新增的換行樣式。
+    //   代收代辦(sheet1) = P4，原樣式 s=147（fontId 6）
+    //   預算內  (sheet2) = O4，原樣式 s=231（fontId 27）
+    const VOUCHER_CELL = {
+        '代收代辦': { cell: 'P4', from: 147 },
+        '預算內':   { cell: 'O4', from: 231 }
+    };
+
     // ===== 模式偵測 =====
 
     let _modeCache = null;
@@ -199,6 +208,22 @@ const ExcelGenerator = (() => {
         return xml.replace(/(<sheetView\b)/, `$1 tabSelected="${val}"`);
     }
 
+    /**
+     * 讓黏存單用途說明格自動換行：
+     *  (1) 把該格樣式指向新增的「同屬性 + wrapText」樣式
+     *  (2) 移除 row 4 固定列高，讓內容依換行自動撐高
+     */
+    function applyVoucherWrap(sheetXml, sheetName, wrapStyleIdx) {
+        const v = VOUCHER_CELL[sheetName];
+        if (!v) return sheetXml;
+        sheetXml = sheetXml.replace(
+            new RegExp(`(<c r="${v.cell}") s="${v.from}"`),
+            `$1 s="${wrapStyleIdx}"`
+        );
+        sheetXml = sheetXml.replace(/(<row r="4"[^>]*)\bcustomHeight="1"\b/, '$1');
+        return sheetXml;
+    }
+
     async function generateViaJSZip(params) {
         const templateData = await loadTemplate();
         const zip = await JSZip.loadAsync(templateData);
@@ -206,11 +231,26 @@ const ExcelGenerator = (() => {
         const sheetName = params.templateType;
         const cells = SHEET_CELLS[sheetName];
         const sheetFile = SHEET_FILES[sheetName];
-        const otherFile = sheetName === '預算內'
-            ? SHEET_FILES['代收代辦']
-            : SHEET_FILES['預算內'];
+        const otherName = sheetName === '預算內' ? '代收代辦' : '預算內';
+        const otherFile = SHEET_FILES[otherName];
 
         if (!sheetFile) throw new Error(`未知的工作表類型：${sheetName}`);
+
+        // ===== 為黏存單用途說明格建立「自動換行」樣式 =====
+        // 在 styles.xml 末端附加兩個「與原樣式相同、只多 wrapText」的 cellXfs，
+        // 再讓 P4(代收代辦)/O4(預算內) 指過去，長字串才會自動換行。
+        let stylesXml = await zip.file('xl/styles.xml').async('string');
+        const baseIdx = parseInt(stylesXml.match(/<cellXfs count="(\d+)">/)[1], 10);
+        const WRAP_XF = {
+            '代收代辦': baseIdx,       // xf147 的換行版（fontId 6）
+            '預算內':   baseIdx + 1    // xf231 的換行版（fontId 27）
+        };
+        const newXfs =
+            '<xf numFmtId="0" fontId="6" fillId="0" borderId="2" applyAlignment="1" applyProtection="1" pivotButton="0" quotePrefix="0" xfId="0"><alignment horizontal="center" vertical="center" wrapText="1"/><protection locked="0" hidden="1"/></xf>' +
+            '<xf numFmtId="0" fontId="27" fillId="0" borderId="2" applyAlignment="1" applyProtection="1" pivotButton="0" quotePrefix="0" xfId="0"><alignment horizontal="center" vertical="center" wrapText="1"/><protection locked="0" hidden="1"/></xf>';
+        stylesXml = stylesXml.replace(/(<cellXfs count=")\d+(">)/, `$1${baseIdx + 2}$2`);
+        stylesXml = stylesXml.replace('</cellXfs>', newXfs + '</cellXfs>');
+        zip.file('xl/styles.xml', stylesXml);
 
         // ===== 修補目標工作表 =====
         let xml = await zip.file(sheetFile).async('string');
@@ -235,11 +275,8 @@ const ExcelGenerator = (() => {
         // 用途說明
         if (params.purpose) xml = patchStr(xml, cells.purposeCell, params.purpose);
 
-        // 黏存單用途說明格：確保自動換行格式
-        // 代收代辦(sheet1) P4 原樣式 s=147 無 wrapText → 改為 s=148（同屬性但有 wrapText）
-        xml = xml.replace(/<c r="P4" s="147"/, '<c r="P4" s="148"');
-        // 移除 row 4 固定高度限制，讓 Excel 依內容自動展開
-        xml = xml.replace(/(<row r="4"[^>]*)\bcustomHeight="1"\b/, '$1');
+        // 黏存單用途說明格：套用自動換行樣式
+        xml = applyVoucherWrap(xml, sheetName, WRAP_XF[sheetName]);
 
         // 單位別（B13）
         if (params.unit) xml = patchStr(xml, 'B13', params.unit);
@@ -268,6 +305,8 @@ const ExcelGenerator = (() => {
                 xmlOther = clearNum(xmlOther,  `C${row}`);
                 xmlOther = clearNum(xmlOther,  `E${row}`);
             }
+            // 黏存單用途說明格：另一張表也套用自動換行樣式
+            xmlOther = applyVoucherWrap(xmlOther, otherName, WRAP_XF[otherName]);
             // 解除工作表群組：另一張表取消選取
             xmlOther = setTabSelected(xmlOther, false);
             zip.file(otherFile, xmlOther);
