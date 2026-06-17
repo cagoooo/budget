@@ -521,7 +521,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             const dateStr = `${year}${String(month).padStart(2, '0')}${String(day).padStart(2, '0')}`;
-            const filename = `動支及黏存單_${type}_${dateStr}.xlsx`;
+            // 檔名含用途說明，例如：高年級電腦主機汰舊替換新(動支及黏存單_預算內)_1150616.xlsx
+            // 過濾檔名不合法字元（\ / : * ? " < > |）避免下載失敗
+            const safePurpose = purpose.replace(/[\\/:*?"<>|]/g, '').trim();
+            const filename = `${safePurpose}(動支及黏存單_${type})_${dateStr}.xlsx`;
             ExcelGenerator.downloadFile(data, filename);
 
             hideLoading();
