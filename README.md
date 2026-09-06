@@ -4,6 +4,8 @@
 >
 > Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/tadnews/page.php?ncsn=11&nsn=16#a5)
 
+🌐 **線上使用：[動支及黏存單自動產生系統](https://cagoooo.github.io/budget/)**
+
 上傳廠商報價單 PDF，自動解析品項，一鍵產出格式完整的動支及黏存單 Excel 檔案。
 
 ---
@@ -222,7 +224,7 @@ Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/tadnews/pag
 - Repository：`cagoooo/budget`
 - 可見性：公開
 - 主要技術：JavaScript
-- 線上入口：未在 GitHub repository metadata 設定
+- 線上入口：<https://cagoooo.github.io/budget/>
 
 ### 可以怎麼應用
 
