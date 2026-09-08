@@ -2,7 +2,7 @@
 
 > 桃園市龍潭區石門國民小學 — 開源行政工具　　![版本](https://img.shields.io/badge/版本-v1.4.0-blue) ![授權](https://img.shields.io/badge/授權-MIT-green)
 >
-> Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/tadnews/page.php?ncsn=11&nsn=16#a5)
+> Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/school/index.php?department_id=2&zone_id=0&page_id=2&content_id=11&type=news&from_op=all_news#a5)
 
 🌐 **線上使用：[動支及黏存單自動產生系統](https://cagoooo.github.io/budget/)**
 
@@ -209,7 +209,7 @@ A：不會。所有 PDF 解析與 Excel 產生均在本機（本地模式）或�
 
 MIT License — 開源免費，歡迎修改與再利用。
 
-Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/tadnews/page.php?ncsn=11&nsn=16#a5)
+Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/school/index.php?department_id=2&zone_id=0&page_id=2&content_id=11&type=news&from_op=all_news#a5)
 
 ---
 

@@ -1,7 +1,7 @@
 # 未來優化改良建議
 
 > 動支及黏存單自動產生系統 — 開發路線圖
-> Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/tadnews/page.php?ncsn=11&nsn=16#a5)
+> Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/school/index.php?department_id=2&zone_id=0&page_id=2&content_id=11&type=news&from_op=all_news#a5)
 > 最後更新：2026-03-23（v1.4.6）
 
 ---
@@ -450,4 +450,4 @@ async function checkUpdate() {
 
 *如有任何建議或想優先實作某項功能，歡迎聯繫阿凱老師！*
 
-Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/tadnews/page.php?ncsn=11&nsn=16#a5)
+Made with 💝 by [阿凱老師](https://www.smes.tyc.edu.tw/modules/school/index.php?department_id=2&zone_id=0&page_id=2&content_id=11&type=news&from_op=all_news#a5)
